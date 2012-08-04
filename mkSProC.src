@@ -1,0 +1,161 @@
+# 
+# Combines replicate variant call data with target variants to create concordant and discordant datasets
+#
+# inputs: All files are in the 'SNP' fileformat and sorted with `sort -k 1b,b` (refer to README) 
+#   target.SNP, rep1.SNP, rep2.SNP (refer to README for descriptions)
+#   trash/ -- trash directory for removing interim files
+#
+# outputs:
+#   concordant.SNP -- all 3 datasets call identical variants
+#   discordant.SNP -- all 3 datasets call variants, replicates agree, but target has a different variant call
+#
+
+# For this example,
+# B.csv, F.csv and iPS.csv are the CGI variant files, reformatted in the 'masterfile' format with cgatools v1.3.0 build 9
+
+
+##################################################################
+#                                                                #
+# Reformat call-out goes here                                    #
+#                                                                #
+##################################################################
+
+export lastBinScoreMin=160
+export binSize=40
+export bifurcate=1
+export distBinSize=1
+# override the above values, if necessary, in local reformat.src:
+source ./reformat.src
+
+##################################################################
+#                                                                #
+# Find concordant/discordant variants                            #
+#                                                                #
+##################################################################
+
+# Consider only autosomes (diploid) chromosomes for consistency
+
+if [ $bifurcate ] ; then 
+  join rep1.SNP rep2.SNP |awk '$2 == $5 {print}' > Rep1AndRep2.joined
+  join target.SNP Rep1AndRep2.joined |awk '$2 == $5 {print}' | \
+    grep -v "chrX" | grep -v "chrY" | grep -v "chrM" \
+    > concordant.SNP
+
+  join target.SNP Rep1AndRep2.joined|awk '$2 != $5 {print}' | \
+    grep -v "chrX" | grep -v "chrY" | grep -v "chrM" \
+    > discordant.SNP
+
+ mv *.joined trash
+fi
+
+##################################################################
+#                                                                #
+# Rank order the concordant allele scores                        #
+#                                                                #
+##################################################################
+
+# save the scores for both concordant alleles
+awk '{print $3 "\n" $4}' concordant.SNP > concordant.scores
+
+# Tally and rank order the scores
+sort -g concordant.scores |uniq -c | awk '{print $2 "\t" $1}'> concordant.distribution.tsv
+
+mv *.scores trash
+
+##################################################################
+#                                                                #
+# Rank order the discordant allele scores                        #
+#                                                                #
+##################################################################
+
+#
+# Separate the alleles
+#
+
+sed 's/AC/A C/g' discordant.SNP | sed 's/AG/A G/g' |sed 's/AT/A T/g' |sed 's/CG/C G/g' |sed 's/CT/C T/g' |sed 's/GT/G T/g' | \
+  sed 's/AA/A A/g' | sed 's/CC/C C/g' | sed 's/GG/G G/g' | sed 's/TT/T T/g' | 
+  sed 's/:/ /g' > discordant.delim.SNP
+
+#
+# Save the score of the discordant allele(s)
+#
+ if [ -e discordant.scores ] ; then mv discordant.scores trash;  fi
+
+
+## Target is hom:
+
+# case: chr#,<loci> <ref> G  G 37 286 <ref> A A 121 78 <ref> A A 130 117
+#                        $3 $4 $5 $6       $8 $9 
+# print both scores
+awk '$3 == $4 && $8 == $9 {print $5"\n"$6}' discordant.delim.SNP >> discordant.scores
+
+# case: chr#,<loci> <ref> G  G 37 286 <ref> G T 121 78 <ref> G T 130 117
+#                        $3 $4 $5 $6       $8 $9 
+# print lowest score 
+awk '$3 == $4 && $8 != $9 && ( $3 == $8 || $3 == $9 ) && $5 < $6 {print $5}' discordant.delim.SNP >> discordant.scores
+awk '$3 == $4 && $8 != $9 && ( $3 == $8 || $3 == $9 ) && $5 >= $6 {print $6}' discordant.delim.SNP >> discordant.scores
+
+# case: chr#,<loci> <ref> G  G 37 286 <ref> A T 121 78 <ref> A T 130 117
+#                        $3 $4 $5 $6       $8 $9 
+# print both scores
+awk '$3 == $4 && $8 != $9 && ( $3 != $8 && $3 != $9 ) {print $5"\n"$6}' discordant.delim.SNP >> discordant.scores
+
+
+## Target is het:
+
+# case: chr#,<loci> <ref> A  G 37 286 <ref> A A 121 78 <ref> A A 130 117
+#                        $3 $4 $5 $6       $8 $9 
+# print score of discordant allele
+awk '$3 != $4 && $8 == $9 && $4 == $8 {print $5}' discordant.delim.SNP >> discordant.scores
+awk '$3 != $4 && $8 == $9 && $3 == $8 {print $6}' discordant.delim.SNP >> discordant.scores
+
+# case: chr#,<loci> <ref> A  G 37 286 <ref> T T 121 78 <ref> T T 130 117
+#                        $3 $4 $5 $6       $8 $9 
+# print both scores
+awk '$3 != $4 && $8 == $9 && ( $3 != $8 && $4 != $8 ) {print $5"\n"$6}' discordant.delim.SNP >> discordant.scores
+
+# case: chr#,<loci> <ref> A  G 37 286 <ref> A T 121 78 <ref> A T 130 117
+#                        $3 $4 $5 $6       $8 $9 
+# print score of discordant allele
+awk '$3 != $4 && $8 != $9  && ($4 == $8 || $4 == $9) {print $5}' discordant.delim.SNP >> discordant.scores
+awk '$3 != $4 && $8 != $9  && ($3 == $8 || $3 == $9) {print $6}' discordant.delim.SNP >> discordant.scores
+
+# case: chr#,<loci> <ref> A  G 37 286 <ref> C T 121 78 <ref> C T 130 117
+#                        $3 $4 $5 $6       $8 $9 
+# print both scores
+awk '$3 != $4 && $8 != $9 && $3 != $8 && $3 != $9 && $4 != $8 && $4 != $9 {print $5"\n"$6}' discordant.delim.SNP >> discordant.scores
+
+# Tally and rank order the scores
+sort -g discordant.scores |uniq -c | awk '{print $2 "\t" $1}'> discordant.distribution.tsv
+
+mv *.scores *.delim.SNP trash
+
+##################################################################
+#                                                                #
+# Bin the rank-ordered distributions                             #
+#                                                                #
+##################################################################
+
+../../src/binTallies.pl discordant.distribution.tsv $lastBinScoreMin $binSize > discordant.binned.tsv
+../../src/binTallies.pl concordant.distribution.tsv $lastBinScoreMin $binSize > concordant.binned.tsv
+
+##################################################################
+#                                                                #
+# Create and combine cumulative distributions for lookup table   #
+#                                                                #
+##################################################################
+
+# get the maximum score:
+
+tail -1 concordant.distribution.tsv > tmp.maxScore
+tail -1 discordant.distribution.tsv >> tmp.maxScore
+export maxScore=`sort -g tmp.maxScore |tail -1|awk '{print $1}'`
+mv tmp.maxScore trash
+
+../../src/accumulateDistribution.pl discordant.distribution.tsv $maxScore $distBinSize > discordant.cdf.tsv
+../../src/accumulateDistribution.pl concordant.distribution.tsv $maxScore $distBinSize > concordant.cdf.tsv
+
+echo -e "score\tfalse-positive-fraction\ttrue-positive-fraction" > lookupTable.tsv
+join discordant.cdf.tsv concordant.cdf.tsv | sed 's/ /\t/g' >> lookupTable.tsv
+
+mv *.cdf.tsv trash

@@ -1,0 +1,65 @@
+* System Requirements:
+
+Unix commands: join, sort, mv, sed, awk
+perl installed at /usr/local/bin/
+
+
+* Input Calibration Data File Format (SNP):
+
+  - Input file format follows the following convention:
+
+<chr#>,<locus>/t<ref>:<alleles>/t<allele1-score>/t<allele2-score>
+
+  e.g.:
+
+chr10,10000004	T:GT	89	120
+
+  - The data are expected to be sorted on loci with `sort -k 1b,1`
+
+  - Alleles should be in alphabetical order. For example, to convert a
+CGI masterVarFile to this format, use the following unix shell
+command:
+
+  awk -F"\t" '$7=="snp" && $9 !~ "?" && $9 !~ "N" && $10 !~ "?" && $10 !~ "N" {print $3 "," $4 "\t" $8 ":" $9 $10 "\t" $11 "\t" $12}' rep1-masterVarFile.csv \
+      |  sed 's/CA/AC/g'|sed 's/GA/AG/g'|sed 's/TA/AT/g'|sed 's/GC/CG/g'|sed 's/TC/CT/g'|sed 's/TG/GT/g' \
+      | sort -k 1b,1 > rep1.SNP
+
+  - All calls are for single-nucleotide variants, not including
+    insertions or deletions.
+
+  - Ref calls need NOT be included.
+
+  - Scores are expected to be integers
+
+
+* File names:
+
+  - Input file naming convention are as follows:
+
+  target.SNP -- variants to be evaluated for truth
+  rep1.SNP -- variants to be used for voting (first replicant)
+  rep2.SNP -- variants to be used for voting (second replicant)
+
+
+* Pipeline:
+
+
+# Combine the three datasets
+# Note: if a 'reformat.src' exists in the current directory, it will be called to create the *.SNP files.
+#
+# inputs: 
+#  target.SNP, rep1.SNP, rep2.SNP -- 'SNP' files containing all calls for each source, see above for format details
+#  trash -- directory for removing interim files
+#  reformat.src -- (optional) called out from pipeline to reformat source data as 'SNP' file.
+#       Also used for overriding default pipeline values. Pipeline variables:
+#         lastBinScoreMin [160] -- minimum score for the final bin in *.binned.tsv outputs (see below)
+#         binSize [40] --  bin size for *.binned.tsv outputs
+#         bifurcate [1] -- flag delineating whether or not to bifurcate the data (e.g., create discordant.SNP, concordant.SNP)
+#                          Set this flag to 0 if reformat.src already did the bifurcation.
+#
+# outputs: discordant.SNP, concordant.SNP, 
+#          discordant.distribution.tsv, concordant.distribution.tsv -- distribution of scores and counts to support histogram charts
+#          discordant.binned.tsv, concordant.binned.tsv -- scores binned by binSize (see above), with last bin starting at lastBinScoreMin.
+#          ** lookupTable.tsv -- data table for ROC-like plot
+#
+source mkSProC.src
