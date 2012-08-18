@@ -1,4 +1,9 @@
 #!/usr/local/bin/perl
+#
+# mkSPRoC by Kimberly Robasky is licensed under a Creative Commons Attribution 3.0 Unported License.
+# To view a copy of this license, visit http://creativecommons.org/licenses/by/3.0/.
+
+
 
 $ARGC = $#ARGV + 1;
 if($ARGC != 3 && $ARGC != 4 ) {
